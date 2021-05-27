@@ -1,0 +1,10 @@
+[package]
+name = "array_builder"
+version = "0.1.0"
+edition = "2018"
+description = "Implementation example for https://github.com/rust-lang/rfcs/pull/3131"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
