@@ -1,6 +1,3 @@
-//! ArrayBuilder makes it easy to dynamically build arrays safely
-//! and efficiently.
-//!
 //! Dynamic array initialisation is very dangerous currently.
 //! The safest way is to initialize one with a default value
 //!
@@ -47,7 +44,7 @@
 //! dropped properly. This is exactly what [`ArrayBuilder`] provides.
 //!
 //! ```should_panic
-//! use array_builder::ArrayBuilder;
+//! # use array_builder::ArrayBuilder;
 //! let mut uninit: ArrayBuilder<String, 8> = ArrayBuilder::new();
 //! uninit.push("foo".to_string());
 //! uninit.push("bar".to_string());
@@ -56,12 +53,30 @@
 //! ```
 //!
 //! ```
-//! use array_builder::ArrayBuilder;
+//! # use array_builder::ArrayBuilder;
 //! let mut uninit: ArrayBuilder<String, 3> = ArrayBuilder::new();
 //! uninit.push("foo".to_string());
 //! uninit.push("bar".to_string());
 //! uninit.push("baz".to_string());
 //! let array: [String; 3] = uninit.build().unwrap();
+//! ```
+//!
+//! You can also take a peek at what the current set of initialised values are
+//!
+//! ```
+//! # use array_builder::ArrayBuilder;
+//! let mut uninit: ArrayBuilder<usize, 4> = ArrayBuilder::new();
+//! uninit.push(1);
+//! uninit.push(2);
+//! uninit.push(3);
+//!
+//! // we can't build just yet
+//! let mut uninit = uninit.build().unwrap_err();
+//! let slice: &[usize] = &uninit;
+//! assert_eq!(&[1, 2, 3], slice);
+//!
+//! uninit.push(4);
+//! assert_eq!([1, 2, 3, 4], uninit.build().unwrap());
 //! ```
 
 use core::{
