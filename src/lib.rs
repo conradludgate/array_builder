@@ -1,51 +1,75 @@
 //! ArrayBuilder makes it easy to dynamically build arrays safely
 //! and efficiently.
 //!
+//! Dynamic array initialisation is very dangerous currently.
+//! The safest way is to initialize one with a default value
+//!
+//! ```
+//! let mut array = [0; 32];
+//! for i in 0..32 {
+//!     array[i] = i;
+//! }
+//! ```
+//!
+//! This is not possible in general though. For any type `[T; N]`,
+//! T either needs to be [`Copy`], or there needs to be a `const t: T`.
+//! This is definitely not always the case.
+//!
+//! The second problem is efficiency. In the example above, we are
+//! filling an array with zeros, just to replace them. While the
+//! compiler can sometimes optimise this away, it's nice to have the guarantee.
+//!
+//! So, what's the alternative? How about [`MaybeUninit`]! Although, it's not that simple.
+//! Take the following example, which uses completely safe Rust! Can you spot the error?
+//!
+//! ```should_panic
+//! # #![feature(maybe_uninit_uninit_array)]
+//! # #![feature(maybe_uninit_extra)]
+//! # use std::mem::MaybeUninit;
+//! let mut uninit: [MaybeUninit<String>; 8] = MaybeUninit::uninit_array();
+//! uninit[0].write("foo".to_string());
+//! uninit[1].write("bar".to_string());
+//! uninit[2].write("baz".to_string());
+//! panic!("oops");
+//! ```
+//!
+//! Did you spot it? Right there is a memory leak. The key here is that
+//! [`MaybeUninit`] **does not** implement [`Drop`]. This makes sense
+//! since the value could be uninitialized, and calling [`Drop`] on an
+//! uninitialized value is undefined behaviour. The result of this is that
+//! the 3 [`String`] values we did initialize never got dropped!
+//! Now, this is safe according to Rust. Leaking memory is not undefined
+//! behaviour. But it's still not something we should promote.
+//!
+//! What other options do we have? The only solution is to provide a new
+//! `struct` that wraps the array, and properly implements [`Drop`]. That
+//! way, if `drop` is called, we can make sure any initialized values get
+//! dropped properly. This is exactly what [`ArrayBuilder`] provides.
+//!
+//! ```should_panic
+//! use array_builder::ArrayBuilder;
+//! let mut uninit: ArrayBuilder<String, 8> = ArrayBuilder::new();
+//! uninit.push("foo".to_string());
+//! uninit.push("bar".to_string());
+//! uninit.push("baz".to_string());
+//! panic!("oops"); // ArrayBuilder drops the 3 values above for you
+//! ```
+//!
 //! ```
 //! use array_builder::ArrayBuilder;
-//!
-//! struct ArrayIterator<I: Iterator, const N: usize> {
-//!     builder: ArrayBuilder<I::Item, N>,
-//!     iter: I,
-//! }
-//!
-//! impl<I: Iterator, const N: usize> Iterator for ArrayIterator<I, N> {
-//!     type Item = [I::Item; N];
-//!
-//!     fn next(&mut self) -> Option<Self::Item> {
-//!         for _ in self.builder.len()..N {
-//!             self.builder.push(self.iter.next()?);
-//!         }
-//!         self.builder.take().build().ok()
-//!     }
-//! }
-//!
-//! impl<I: Iterator, const N: usize> ArrayIterator<I, N> {
-//!     pub fn new(i: impl IntoIterator<IntoIter=I>) -> Self {
-//!         Self {
-//!             builder: ArrayBuilder::new(),
-//!             iter: i.into_iter(),
-//!         }
-//!     }
-//!
-//!     pub fn remaining(&self) -> &[I::Item] {
-//!         &self.builder
-//!     }
-//! }
-//!
-//! let mut i = ArrayIterator::new(0..10);
-//! assert_eq!(Some([0, 1, 2, 3]), i.next());
-//! assert_eq!(Some([4, 5, 6, 7]), i.next());
-//! assert_eq!(None, i.next());
-//! assert_eq!(&[8, 9], i.remaining());
+//! let mut uninit: ArrayBuilder<String, 3> = ArrayBuilder::new();
+//! uninit.push("foo".to_string());
+//! uninit.push("bar".to_string());
+//! uninit.push("baz".to_string());
+//! let array: [String; 3] = uninit.build().unwrap();
 //! ```
 
 use core::{
+    cmp, fmt,
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr, slice,
 };
-use std::{cmp, fmt};
 
 /// ArrayBuilder makes it easy to dynamically build arrays safely
 /// and efficiently.
@@ -91,6 +115,15 @@ use std::{cmp, fmt};
 pub struct ArrayBuilder<T, const N: usize> {
     buf: [MaybeUninit<T>; N],
     len: usize,
+}
+
+impl<T: Clone, const N: usize> Clone for ArrayBuilder<T, N> {
+    fn clone(&self) -> Self {
+        let mut new = Self::new();
+        new.len = self.len();
+        new.deref_mut().clone_from_slice(self.deref());
+        new
+    }
 }
 
 impl<T: fmt::Debug, const N: usize> fmt::Debug for ArrayBuilder<T, N> {
